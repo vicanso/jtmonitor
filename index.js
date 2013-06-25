@@ -1,29 +1,55 @@
 (function() {
-  var MBSize, monitor, os;
+  var MBSize, cpuUsageCmd, cpuUsageExec, monitor, noop, os;
 
   MBSize = 1024 * 1024;
 
   os = require('os');
 
+  cpuUsageExec = require('child_process').exec;
+
+  cpuUsageCmd = "ps -p " + process.pid + " -o %cpu";
+
+  noop = function() {};
+
   monitor = {
+    /**
+    	 * start 开始监控
+    	 * @param  {[type]} @options =             {} [description]
+    	 * @return {[type]}          [description]
+    */
+
     start: function(options) {
       var checkInterval, cpuTotal, freeMemory, freeMemoryLimits, i, loadavg, loadavgLimits, totalmem, _base, _i, _j, _len, _len1, _ref,
         _this = this;
       this.options = options != null ? options : {};
+      this._checkHandlers = [];
       if ((_ref = (_base = this.options).checkInterval) == null) {
         _base.checkInterval = 3 * 1000;
       }
       checkInterval = this.options.checkInterval;
       freeMemoryLimits = this.options.freeMemoryLimits;
+      if (this.options.memoryLimits) {
+        this._checkHandlers.push(function(cbf) {
+          return _this._checkMemory(cbf);
+        });
+      }
+      if (this.options.cpuUsageLimits) {
+        this._checkHandlers.push(function(cbf) {
+          return _this._checkCpuUsage(cbf);
+        });
+      }
       if (freeMemoryLimits) {
         totalmem = Math.floor(os.totalmem() / MBSize);
         for (i = _i = 0, _len = freeMemoryLimits.length; _i < _len; i = ++_i) {
           freeMemory = freeMemoryLimits[i];
           freeMemory = freeMemoryLimits[i];
-          if (freeMemory !== GLOBAL.parseInt(freeMemory)) {
+          if (freeMemory !== GLOBAL.parseInt(freeMemory) && freeMemory < 1) {
             freeMemoryLimits[i] = freeMemory * totalmem;
           }
         }
+        this._checkHandlers.push(function(cbf) {
+          return _this._checkFreememory(cbf);
+        });
       }
       loadavgLimits = this.options.loadavgLimits;
       if (loadavgLimits) {
@@ -32,95 +58,162 @@
           loadavg = loadavgLimits[i];
           loadavgLimits[i] = loadavg * cpuTotal;
         }
+        this._checkHandlers.push(function(cbf) {
+          return _this._checkLoadavg(cbf);
+        });
       }
-      setTimeout(function() {
+      return setTimeout(function() {
         return _this._check(checkInterval);
       }, checkInterval);
-      return this.time = process.hrtime();
     },
+    addChecker: function(checker) {
+      return this._checkHandlers.push(checker);
+    },
+    /**
+    	 * _check 定时执行check任务
+    	 * @param  {[type]} checkInterval [description]
+    	 * @return {[type]}               [description]
+    */
+
     _check: function(checkInterval) {
-      var handler, handlers, result, results, _i, _len,
+      var func, handler, results, _i, _len, _ref,
         _this = this;
-      handlers = this.options.handlers;
-      if (handlers) {
+      handler = this.options.cbf;
+      if (handler) {
         results = [];
-        results.push(this._checkMemory());
-        results.push(this._checkFreememory());
-        results.push(this._checkLoadavg());
-        for (_i = 0, _len = results.length; _i < _len; _i++) {
-          result = results[_i];
-          if (result) {
-            handler = handlers[result.handlerIndex];
-            if (handler) {
-              handler(result.msg);
-            }
-          }
+        _ref = this._checkHandlers;
+        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+          func = _ref[_i];
+          func(handler);
         }
       }
       return setTimeout(function() {
         return _this._check(checkInterval);
       }, checkInterval);
     },
-    _checkLoadavg: function() {
-      var i, loadavg, loadavgLimits, result, _i, _ref;
+    /**
+    	 * _checkLoadavg 检测系统的load avg（每5分钟的）
+    	 * @return {[type]} [description]
+    */
+
+    _checkLoadavg: function(cbf) {
+      var level, loadavg, loadavgLimits, result;
+      if (cbf == null) {
+        cbf = noop;
+      }
       loadavgLimits = this.options.loadavgLimits;
       result = null;
-      if ((loadavgLimits != null ? loadavgLimits.length : void 0) < 2) {
-        return result;
-      } else {
+      if ((loadavgLimits != null ? loadavgLimits.length : void 0) >= 2) {
         loadavg = os.loadavg()[1];
-        for (i = _i = _ref = loadavgLimits.length - 1; _ref <= 0 ? _i <= 0 : _i >= 0; i = _ref <= 0 ? ++_i : --_i) {
-          if (loadavg > loadavgLimits[i]) {
-            result = {
-              handlerIndex: i,
-              msg: "loadavg is " + loadavg + ", higher than limit (" + loadavgLimits[i] + ")"
-            };
-            break;
-          }
-        }
-        return result;
+        level = this._getIndex(loadavgLimits, loadavg);
+        result = {
+          type: 'loadavg',
+          level: level,
+          value: loadavg
+        };
       }
+      return cbf(null, result);
     },
-    _checkFreememory: function() {
-      var freeMemory, freeMemoryLimits, i, result, _i, _ref;
+    /**
+    	 * _checkFreememory 检测可用内存
+    	 * @return {[type]} [description]
+    */
+
+    _checkFreememory: function(cbf) {
+      var freeMemory, freeMemoryLimits, level, result;
+      if (cbf == null) {
+        cbf = noop;
+      }
       freeMemoryLimits = this.options.freeMemoryLimits;
       result = null;
-      if ((freeMemoryLimits != null ? freeMemoryLimits.length : void 0) < 2) {
-        return result;
-      } else {
+      if ((freeMemoryLimits != null ? freeMemoryLimits.length : void 0) >= 2) {
         freeMemory = Math.floor(os.freemem() / MBSize);
-        for (i = _i = _ref = freeMemoryLimits.length - 1; _ref <= 0 ? _i <= 0 : _i >= 0; i = _ref <= 0 ? ++_i : --_i) {
-          if (freeMemory < freeMemoryLimits[i]) {
-            result = {
-              handlerIndex: i,
-              msg: "free memory is " + freeMemory + "MB, less than limit (" + freeMemoryLimits[i] + "MB)"
-            };
-            break;
-          }
-        }
-        return result;
+        level = this._getIndex(freeMemoryLimits, freeMemory);
+        result = {
+          type: 'freeMemory',
+          level: level,
+          value: freeMemory
+        };
       }
+      return cbf(null, result);
     },
-    _checkMemory: function() {
-      var i, memoryLimits, memoryUsage, memoryUseTotal, result, _i, _ref;
+    /**
+    	 * _checkMemory 检测node使用了的内存
+    	 * @return {[type]} [description]
+    */
+
+    _checkMemory: function(cbf) {
+      var level, memoryLimits, memoryUsage, memoryUseTotal, result;
+      if (cbf == null) {
+        cbf = noop;
+      }
       memoryLimits = this.options.memoryLimits;
       result = null;
-      if ((memoryLimits != null ? memoryLimits.length : void 0) < 2) {
-        return result;
-      } else {
+      if ((memoryLimits != null ? memoryLimits.length : void 0) >= 2) {
         memoryUsage = process.memoryUsage();
         memoryUseTotal = Math.floor((memoryUsage.rss + memoryUsage.heapTotal) / MBSize);
-        for (i = _i = _ref = memoryLimits.length - 1; _ref <= 0 ? _i <= 0 : _i >= 0; i = _ref <= 0 ? ++_i : --_i) {
-          if (memoryUseTotal > memoryLimits[i]) {
-            result = {
-              handlerIndex: i,
-              msg: "memory is used " + memoryUseTotal + "MB, more than limit (" + memoryLimits[i] + "MB)"
-            };
-            break;
+        level = this._getIndex(memoryLimits, memoryUseTotal);
+        result = {
+          type: 'memoryUsage',
+          level: level,
+          value: memoryUseTotal
+        };
+      }
+      return cbf(null, result);
+    },
+    /**
+    	 * _checkCpuUsage 检测CPU的使用率，使用ps命令
+    	 * @param  {[type]} cbf =             noop [description]
+    	 * @return {[type]}     [description]
+    */
+
+    _checkCpuUsage: function(cbf) {
+      var cpuUsageLimits,
+        _this = this;
+      if (cbf == null) {
+        cbf = noop;
+      }
+      cpuUsageLimits = this.options.cpuUsageLimits;
+      return cpuUsageExec(cpuUsageCmd, function(err, result) {
+        var level, usage, _ref;
+        if (err) {
+          return cbf(err);
+        } else if (result) {
+          usage = (_ref = result.split('\n')[1]) != null ? _ref.trim() : void 0;
+          if (usage) {
+            usage = GLOBAL.parseFloat(usage);
+            level = _this._getIndex(cpuUsageLimits, usage);
+            return cbf(null, {
+              type: 'cpuUsage',
+              level: level,
+              value: usage
+            });
           }
         }
-        return result;
+      });
+    },
+    /**
+    	 * _getIndex 获取在数组中的位置
+    	 * @param  {[type]} arr   [description]
+    	 * @param  {[type]} value [description]
+    	 * @return {[type]}       [description]
+    */
+
+    _getIndex: function(arr, value) {
+      var cardinal, checkValue, i, index, _i, _len;
+      index = arr.length;
+      cardinal = 1;
+      if (arr[0] > arr[1]) {
+        cardinal = -1;
       }
+      for (i = _i = 0, _len = arr.length; _i < _len; i = ++_i) {
+        checkValue = arr[i];
+        if ((checkValue - value) * cardinal > 0) {
+          index = i;
+          break;
+        }
+      }
+      return index;
     }
   };
 

@@ -1,40 +1,47 @@
 (function() {
-  var http, jtMonitor, server;
+  var cmd, exec, http, jtMonitor, server;
 
   jtMonitor = require('../index');
 
   http = require('http');
 
   jtMonitor.start({
-    checkInterval: 6 * 1000,
+    checkInterval: 2 * 1000,
     memoryLimits: [10, 13, 150],
     loadavgLimits: [0.6, 0.65, 1],
-    freeMemoryLimits: [0.5, 512, 256],
-    handlers: [
-      function(msg) {
-        return console.info(msg);
-      }, function(msg) {
-        return console.warn(msg);
-      }, function(msg) {
-        return console.error(msg);
+    freeMemoryLimits: [0.9, 512, 256],
+    cpuUsageLimits: [30, 50, 80],
+    cbf: function(err, info) {
+      if (!err && info) {
+        return console.dir(info);
       }
-    ]
+    }
   });
+
+  if (process.platform !== 'win32') {
+    exec = require('child_process').exec;
+    cmd = "ps -p " + process.pid + " -o %cpu";
+    jtMonitor.addChecker(function(cbf) {
+      return exec(cmd, function(err, result) {
+        var usage, _ref;
+        if (result) {
+          usage = (_ref = result.split('\n')[1]) != null ? _ref.trim() : void 0;
+          return cbf(null, {
+            type: 'cpu',
+            level: 2,
+            value: usage
+          });
+        }
+      });
+    });
+  }
+
+  setTimeout(function() {});
 
   server = http.createServer(function(req, res) {
-    if (req.url === '/restart') {
-      process.send({
-        cmd: 'restart'
-      });
-    } else if (req.url === '/forcerestart') {
-      process.send({
-        cmd: 'forcerestart'
-      });
-    }
-    res.writeHead(200);
-    return res.end('hello world');
+    return res.send(200, 'hello world');
   });
 
-  server.listen(8000);
+  server.listen(8080);
 
 }).call(this);

@@ -1,82 +1,140 @@
 MBSize = 1024 * 1024
 os = require 'os'
+cpuUsageExec = require('child_process').exec
+cpuUsageCmd = "ps -p #{process.pid} -o %cpu"
+noop = ->
 monitor = 
+	###*
+	 * start 开始监控
+	 * @param  {[type]} @options =             {} [description]
+	 * @return {[type]}          [description]
+	###
 	start : (@options = {}) ->
+		@_checkHandlers = []
 		@options.checkInterval ?= 3 * 1000
 		checkInterval = @options.checkInterval
 		freeMemoryLimits = @options.freeMemoryLimits
+		if @options.memoryLimits
+			@_checkHandlers.push (cbf) =>
+				@_checkMemory cbf
+		if @options.cpuUsageLimits
+			@_checkHandlers.push (cbf) =>
+				@_checkCpuUsage cbf
 		if freeMemoryLimits
 			totalmem = Math.floor os.totalmem() / MBSize
 			for freeMemory, i in freeMemoryLimits
 				freeMemory = freeMemoryLimits[i]
-				if freeMemory != GLOBAL.parseInt freeMemory
+				if freeMemory != GLOBAL.parseInt(freeMemory) && freeMemory < 1
 					freeMemoryLimits[i] = freeMemory * totalmem
+			@_checkHandlers.push (cbf) =>
+				@_checkFreememory cbf
 		loadavgLimits = @options.loadavgLimits
 		if loadavgLimits
 			cpuTotal = os.cpus().length
 			for loadavg, i in loadavgLimits
 				loadavgLimits[i] = loadavg * cpuTotal
+			@_checkHandlers.push (cbf) =>
+				@_checkLoadavg cbf
 		setTimeout =>
 			@_check checkInterval
 		, checkInterval
-		@time = process.hrtime()
+	addChecker : (checker) ->
+		@_checkHandlers.push checker
+	###*
+	 * _check 定时执行check任务
+	 * @param  {[type]} checkInterval [description]
+	 * @return {[type]}               [description]
+	###
 	_check : (checkInterval) ->
-		handlers = @options.handlers
-		if handlers
+		handler = @options.cbf
+		if handler
 			results = []
-			results.push @_checkMemory()
-			results.push @_checkFreememory()
-			results.push @_checkLoadavg()
-			for result in results
-				if result
-					handler = handlers[result.handlerIndex]
-					if handler
-						handler result.msg
+			for func in @_checkHandlers
+				func handler
 		setTimeout =>
 			@_check checkInterval
 		, checkInterval
-	_checkLoadavg : ->
+	###*
+	 * _checkLoadavg 检测系统的load avg（每5分钟的）
+	 * @return {[type]} [description]
+	###
+	_checkLoadavg : (cbf = noop) ->
 		loadavgLimits = @options.loadavgLimits
 		result = null
-		if loadavgLimits?.length < 2
-			result
-		else
+		if loadavgLimits?.length >= 2
 			loadavg = os.loadavg()[1]
-			for i in [loadavgLimits.length - 1 ..0]
-				if loadavg > loadavgLimits[i]
-					result =
-						handlerIndex : i
-						msg : "loadavg is #{loadavg}, higher than limit (#{loadavgLimits[i]})"
-					break
-			result
-	_checkFreememory : ->
+			level = @_getIndex loadavgLimits, loadavg
+			result =
+				type : 'loadavg'
+				level : level
+				value : loadavg
+		cbf null, result
+	###*
+	 * _checkFreememory 检测可用内存
+	 * @return {[type]} [description]
+	###
+	_checkFreememory : (cbf = noop) ->
 		freeMemoryLimits = @options.freeMemoryLimits
 		result = null
-		if freeMemoryLimits?.length < 2
-			result
-		else
+		if freeMemoryLimits?.length >= 2
 			freeMemory = Math.floor os.freemem() / MBSize
-			for i in [freeMemoryLimits.length - 1 ..0]
-				if freeMemory < freeMemoryLimits[i]
-					result =
-						handlerIndex : i
-						msg : "free memory is #{freeMemory}MB, less than limit (#{freeMemoryLimits[i]}MB)"
-					break
-			result
-	_checkMemory : ->
+			level = @_getIndex freeMemoryLimits, freeMemory
+			result =
+				type : 'freeMemory'
+				level : level
+				value : freeMemory
+		cbf null, result
+	###*
+	 * _checkMemory 检测node使用了的内存
+	 * @return {[type]} [description]
+	###
+	_checkMemory : (cbf = noop) ->
 		memoryLimits = @options.memoryLimits
 		result = null
-		if memoryLimits?.length < 2
-			result
-		else
+		if memoryLimits?.length >= 2
 			memoryUsage = process.memoryUsage()
 			memoryUseTotal = Math.floor (memoryUsage.rss + memoryUsage.heapTotal) / MBSize
-			for i in [memoryLimits.length - 1 ..0]
-				if memoryUseTotal > memoryLimits[i]
-					result =
-						handlerIndex : i
-						msg : "memory is used #{memoryUseTotal}MB, more than limit (#{memoryLimits[i]}MB)"
-					break
-			result
+			level = @_getIndex memoryLimits, memoryUseTotal
+			result =
+				type : 'memoryUsage'
+				level : level
+				value : memoryUseTotal
+		cbf null, result
+	###*
+	 * _checkCpuUsage 检测CPU的使用率，使用ps命令
+	 * @param  {[type]} cbf =             noop [description]
+	 * @return {[type]}     [description]
+	###
+	_checkCpuUsage : (cbf = noop) ->
+		cpuUsageLimits = @options.cpuUsageLimits
+		cpuUsageExec cpuUsageCmd, (err, result) =>
+			if err
+				cbf err
+			else if result
+				usage = result.split('\n')[1]?.trim()
+				if usage
+					usage = GLOBAL.parseFloat usage
+					level = @_getIndex cpuUsageLimits, usage
+					cbf null, {
+						type : 'cpuUsage'
+						level : level
+						value : usage
+					}
 
+	###*
+	 * _getIndex 获取在数组中的位置
+	 * @param  {[type]} arr   [description]
+	 * @param  {[type]} value [description]
+	 * @return {[type]}       [description]
+	###
+	_getIndex : (arr, value) ->
+		index = arr.length
+		cardinal = 1
+		if arr[0] > arr[1]
+			cardinal = -1
+		for checkValue, i in arr
+			if (checkValue - value) * cardinal > 0
+				index = i
+				break
+		index
 module.exports = monitor
