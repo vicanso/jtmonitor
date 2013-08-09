@@ -13,28 +13,11 @@ monitor =
 		@_checkHandlers = []
 		@options.checkInterval ?= 3 * 1000
 		checkInterval = @options.checkInterval
-		freeMemoryLimits = @options.freeMemoryLimits
-		if @options.memoryLimits
-			@_checkHandlers.push (cbf) =>
-				@_checkMemory cbf
-		if @options.cpuUsageLimits
-			@_checkHandlers.push (cbf) =>
-				@_checkCpuUsage cbf
-		if freeMemoryLimits
-			totalmem = Math.floor os.totalmem() / MBSize
-			for freeMemory, i in freeMemoryLimits
-				freeMemory = freeMemoryLimits[i]
-				if freeMemory != GLOBAL.parseInt(freeMemory) && freeMemory < 1
-					freeMemoryLimits[i] = freeMemory * totalmem
-			@_checkHandlers.push (cbf) =>
-				@_checkFreememory cbf
-		loadavgLimits = @options.loadavgLimits
-		if loadavgLimits
-			cpuTotal = os.cpus().length
-			for loadavg, i in loadavgLimits
-				loadavgLimits[i] = loadavg * cpuTotal
-			@_checkHandlers.push (cbf) =>
-				@_checkLoadavg cbf
+		
+		@_setMemoryCheck()
+		@_setCpuUsageCheck()
+		@_setFreeMemoryCheck()
+		@_setLoadavgCheck()
 		setTimeout =>
 			@_check checkInterval
 		, checkInterval
@@ -54,6 +37,14 @@ monitor =
 		setTimeout =>
 			@_check checkInterval
 		, checkInterval
+	_setLoadavgCheck : ->
+		loadavgLimits = @options.loadavgLimits
+		if loadavgLimits
+			cpuTotal = os.cpus().length
+			for loadavg, i in loadavgLimits
+				loadavgLimits[i] = loadavg * cpuTotal
+			@_checkHandlers.push (cbf) =>
+				@_checkLoadavg cbf
 	###*
 	 * _checkLoadavg 检测系统的load avg（每5分钟的）
 	 * @return {[type]} [description]
@@ -69,6 +60,16 @@ monitor =
 				level : level
 				value : loadavg
 		cbf null, result
+	_setFreeMemoryCheck : ->
+		freeMemoryLimits = @options.freeMemoryLimits
+		if freeMemoryLimits
+			totalmem = Math.floor os.totalmem() / MBSize
+			for freeMemory, i in freeMemoryLimits
+				freeMemory = freeMemoryLimits[i]
+				if freeMemory != GLOBAL.parseInt(freeMemory) && freeMemory < 1
+					freeMemoryLimits[i] = freeMemory * totalmem
+			@_checkHandlers.push (cbf) =>
+				@_checkFreememory cbf
 	###*
 	 * _checkFreememory 检测可用内存
 	 * @return {[type]} [description]
@@ -84,6 +85,10 @@ monitor =
 				level : level
 				value : freeMemory
 		cbf null, result
+	_setMemoryCheck : ->
+		if @options.memoryLimits
+			@_checkHandlers.push (cbf) =>
+				@_checkMemory cbf
 	###*
 	 * _checkMemory 检测node使用了的内存
 	 * @return {[type]} [description]
@@ -100,6 +105,10 @@ monitor =
 				level : level
 				value : memoryUseTotal
 		cbf null, result
+	_setCpuUsageCheck : ->
+		if @options.cpuUsageLimits
+			@_checkHandlers.push (cbf) =>
+				@_checkCpuUsage cbf
 	###*
 	 * _checkCpuUsage 检测CPU的使用率，使用ps命令
 	 * @param  {[type]} cbf =             noop [description]

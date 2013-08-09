@@ -1,7 +1,9 @@
 (function() {
-  var cmd, exec, http, jtMonitor, server;
+  var cmd, exec, http, jtMonitor, os, server;
 
   jtMonitor = require('../index');
+
+  os = require('os');
 
   http = require('http');
 

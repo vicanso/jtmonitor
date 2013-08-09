@@ -1,4 +1,5 @@
 jtMonitor = require '../index'
+os = require 'os'
 http = require 'http'
 jtMonitor.start {
   # 检测间隔，单位ms
@@ -15,8 +16,8 @@ jtMonitor.start {
   cbf : (err, info) ->
     if !err && info
       console.dir info
-
 }
+
 if process.platform != 'win32'
   exec = require('child_process').exec
   cmd = "ps -p #{process.pid} -o %cpu"

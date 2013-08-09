@@ -19,7 +19,7 @@
     */
 
     start: function(options) {
-      var checkInterval, cpuTotal, freeMemory, freeMemoryLimits, i, loadavg, loadavgLimits, totalmem, _base, _i, _j, _len, _len1, _ref,
+      var checkInterval, _base, _ref,
         _this = this;
       this.options = options != null ? options : {};
       this._checkHandlers = [];
@@ -27,41 +27,10 @@
         _base.checkInterval = 3 * 1000;
       }
       checkInterval = this.options.checkInterval;
-      freeMemoryLimits = this.options.freeMemoryLimits;
-      if (this.options.memoryLimits) {
-        this._checkHandlers.push(function(cbf) {
-          return _this._checkMemory(cbf);
-        });
-      }
-      if (this.options.cpuUsageLimits) {
-        this._checkHandlers.push(function(cbf) {
-          return _this._checkCpuUsage(cbf);
-        });
-      }
-      if (freeMemoryLimits) {
-        totalmem = Math.floor(os.totalmem() / MBSize);
-        for (i = _i = 0, _len = freeMemoryLimits.length; _i < _len; i = ++_i) {
-          freeMemory = freeMemoryLimits[i];
-          freeMemory = freeMemoryLimits[i];
-          if (freeMemory !== GLOBAL.parseInt(freeMemory) && freeMemory < 1) {
-            freeMemoryLimits[i] = freeMemory * totalmem;
-          }
-        }
-        this._checkHandlers.push(function(cbf) {
-          return _this._checkFreememory(cbf);
-        });
-      }
-      loadavgLimits = this.options.loadavgLimits;
-      if (loadavgLimits) {
-        cpuTotal = os.cpus().length;
-        for (i = _j = 0, _len1 = loadavgLimits.length; _j < _len1; i = ++_j) {
-          loadavg = loadavgLimits[i];
-          loadavgLimits[i] = loadavg * cpuTotal;
-        }
-        this._checkHandlers.push(function(cbf) {
-          return _this._checkLoadavg(cbf);
-        });
-      }
+      this._setMemoryCheck();
+      this._setCpuUsageCheck();
+      this._setFreeMemoryCheck();
+      this._setLoadavgCheck();
       return setTimeout(function() {
         return _this._check(checkInterval);
       }, checkInterval);
@@ -91,6 +60,21 @@
         return _this._check(checkInterval);
       }, checkInterval);
     },
+    _setLoadavgCheck: function() {
+      var cpuTotal, i, loadavg, loadavgLimits, _i, _len,
+        _this = this;
+      loadavgLimits = this.options.loadavgLimits;
+      if (loadavgLimits) {
+        cpuTotal = os.cpus().length;
+        for (i = _i = 0, _len = loadavgLimits.length; _i < _len; i = ++_i) {
+          loadavg = loadavgLimits[i];
+          loadavgLimits[i] = loadavg * cpuTotal;
+        }
+        return this._checkHandlers.push(function(cbf) {
+          return _this._checkLoadavg(cbf);
+        });
+      }
+    },
     /**
     	 * _checkLoadavg 检测系统的load avg（每5分钟的）
     	 * @return {[type]} [description]
@@ -113,6 +97,24 @@
         };
       }
       return cbf(null, result);
+    },
+    _setFreeMemoryCheck: function() {
+      var freeMemory, freeMemoryLimits, i, totalmem, _i, _len,
+        _this = this;
+      freeMemoryLimits = this.options.freeMemoryLimits;
+      if (freeMemoryLimits) {
+        totalmem = Math.floor(os.totalmem() / MBSize);
+        for (i = _i = 0, _len = freeMemoryLimits.length; _i < _len; i = ++_i) {
+          freeMemory = freeMemoryLimits[i];
+          freeMemory = freeMemoryLimits[i];
+          if (freeMemory !== GLOBAL.parseInt(freeMemory) && freeMemory < 1) {
+            freeMemoryLimits[i] = freeMemory * totalmem;
+          }
+        }
+        return this._checkHandlers.push(function(cbf) {
+          return _this._checkFreememory(cbf);
+        });
+      }
     },
     /**
     	 * _checkFreememory 检测可用内存
@@ -137,6 +139,14 @@
       }
       return cbf(null, result);
     },
+    _setMemoryCheck: function() {
+      var _this = this;
+      if (this.options.memoryLimits) {
+        return this._checkHandlers.push(function(cbf) {
+          return _this._checkMemory(cbf);
+        });
+      }
+    },
     /**
     	 * _checkMemory 检测node使用了的内存
     	 * @return {[type]} [description]
@@ -160,6 +170,14 @@
         };
       }
       return cbf(null, result);
+    },
+    _setCpuUsageCheck: function() {
+      var _this = this;
+      if (this.options.cpuUsageLimits) {
+        return this._checkHandlers.push(function(cbf) {
+          return _this._checkCpuUsage(cbf);
+        });
+      }
     },
     /**
     	 * _checkCpuUsage 检测CPU的使用率，使用ps命令
