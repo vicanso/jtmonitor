@@ -1,7 +1,11 @@
 (function() {
-  var MBSize, cpuUsageCmd, cpuUsageExec, monitor, noop, os;
+  var JTMonitor, MBSize, cpuUsageCmd, cpuUsageExec, events, noop, os, _ref,
+    __hasProp = {}.hasOwnProperty,
+    __extends = function(child, parent) { for (var key in parent) { if (__hasProp.call(parent, key)) child[key] = parent[key]; } function ctor() { this.constructor = child; } ctor.prototype = parent.prototype; child.prototype = new ctor(); child.__super__ = parent.prototype; return child; };
 
   MBSize = 1024 * 1024;
+
+  events = require('events');
 
   os = require('os');
 
@@ -11,20 +15,28 @@
 
   noop = function() {};
 
-  monitor = {
+  JTMonitor = (function(_super) {
+    __extends(JTMonitor, _super);
+
+    function JTMonitor() {
+      _ref = JTMonitor.__super__.constructor.apply(this, arguments);
+      return _ref;
+    }
+
     /**
-    	 * start 开始监控
-    	 * @param  {[type]} @options =             {} [description]
-    	 * @return {[type]}          [description]
+     * start 开始监控
+     * @param  {[type]} @options =             {} [description]
+     * @return {[type]}          [description]
     */
 
-    start: function(options) {
-      var checkInterval, _base, _ref,
+
+    JTMonitor.prototype.start = function(options) {
+      var checkInterval, _base,
         _this = this;
       this.options = options != null ? options : {};
       this._checkHandlers = [];
-      if ((_ref = (_base = this.options).checkInterval) == null) {
-        _base.checkInterval = 3 * 1000;
+      if ((_base = this.options).checkInterval == null) {
+        _base.checkInterval = 30 * 1000;
       }
       checkInterval = this.options.checkInterval;
       this._setMemoryCheck();
@@ -34,35 +46,34 @@
       return setTimeout(function() {
         return _this._check(checkInterval);
       }, checkInterval);
-    },
-    addChecker: function(checker) {
+    };
+
+    JTMonitor.prototype.addChecker = function(checker) {
       return this._checkHandlers.push(checker);
-    },
+    };
+
     /**
-    	 * _check 定时执行check任务
-    	 * @param  {[type]} checkInterval [description]
-    	 * @return {[type]}               [description]
+     * _check 定时执行check任务
+     * @param  {[type]} checkInterval [description]
+     * @return {[type]}               [description]
     */
 
-    _check: function(checkInterval) {
-      var func, handler, results, _i, _len, _ref,
+
+    JTMonitor.prototype._check = function(checkInterval) {
+      var func, _i, _len, _ref1,
         _this = this;
-      handler = this.options.cbf;
-      if (handler) {
-        results = [];
-        _ref = this._checkHandlers;
-        for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-          func = _ref[_i];
-          func(handler);
-        }
+      _ref1 = this._checkHandlers;
+      for (_i = 0, _len = _ref1.length; _i < _len; _i++) {
+        func = _ref1[_i];
+        func.apply(this);
       }
       return setTimeout(function() {
         return _this._check(checkInterval);
       }, checkInterval);
-    },
-    _setLoadavgCheck: function() {
-      var cpuTotal, i, loadavg, loadavgLimits, _i, _len,
-        _this = this;
+    };
+
+    JTMonitor.prototype._setLoadavgCheck = function() {
+      var cpuTotal, i, loadavg, loadavgLimits, _i, _len;
       loadavgLimits = this.options.loadavgLimits;
       if (loadavgLimits) {
         cpuTotal = os.cpus().length;
@@ -70,37 +81,35 @@
           loadavg = loadavgLimits[i];
           loadavgLimits[i] = loadavg * cpuTotal;
         }
-        return this._checkHandlers.push(function(cbf) {
-          return _this._checkLoadavg(cbf);
-        });
+        return this._checkHandlers.push(this._checkLoadavg);
       }
-    },
+    };
+
     /**
-    	 * _checkLoadavg 检测系统的load avg（每5分钟的）
-    	 * @return {[type]} [description]
+     * _checkLoadavg 检测系统的load avg（每5分钟的）
+     * @return {[type]} [description]
     */
 
-    _checkLoadavg: function(cbf) {
+
+    JTMonitor.prototype._checkLoadavg = function() {
       var level, loadavg, loadavgLimits, result;
-      if (cbf == null) {
-        cbf = noop;
-      }
       loadavgLimits = this.options.loadavgLimits;
       result = null;
       if ((loadavgLimits != null ? loadavgLimits.length : void 0) >= 2) {
         loadavg = os.loadavg()[1];
         level = this._getIndex(loadavgLimits, loadavg);
         result = {
-          type: 'loadavg',
+          category: 'loadavg',
           level: level,
-          value: loadavg
+          value: GLOBAL.parseFloat(loadavg.toFixed(2)),
+          date: new Date
         };
+        return this.emit('log', result);
       }
-      return cbf(null, result);
-    },
-    _setFreeMemoryCheck: function() {
-      var freeMemory, freeMemoryLimits, i, totalmem, _i, _len,
-        _this = this;
+    };
+
+    JTMonitor.prototype._setFreeMemoryCheck = function() {
+      var freeMemory, freeMemoryLimits, i, totalmem, _i, _len;
       freeMemoryLimits = this.options.freeMemoryLimits;
       if (freeMemoryLimits) {
         totalmem = Math.floor(os.totalmem() / MBSize);
@@ -111,113 +120,107 @@
             freeMemoryLimits[i] = freeMemory * totalmem;
           }
         }
-        return this._checkHandlers.push(function(cbf) {
-          return _this._checkFreememory(cbf);
-        });
+        return this._checkHandlers.push(this._checkFreememory);
       }
-    },
+    };
+
     /**
-    	 * _checkFreememory 检测可用内存
-    	 * @return {[type]} [description]
+     * _checkFreememory 检测可用内存
+     * @return {[type]} [description]
     */
 
-    _checkFreememory: function(cbf) {
+
+    JTMonitor.prototype._checkFreememory = function() {
       var freeMemory, freeMemoryLimits, level, result;
-      if (cbf == null) {
-        cbf = noop;
-      }
       freeMemoryLimits = this.options.freeMemoryLimits;
       result = null;
       if ((freeMemoryLimits != null ? freeMemoryLimits.length : void 0) >= 2) {
         freeMemory = Math.floor(os.freemem() / MBSize);
         level = this._getIndex(freeMemoryLimits, freeMemory);
         result = {
-          type: 'freeMemory',
+          category: 'freeMemory',
           level: level,
-          value: freeMemory
+          value: GLOBAL.parseFloat(freeMemory.toFixed(2)),
+          date: new Date
         };
+        return this.emit('log', result);
       }
-      return cbf(null, result);
-    },
-    _setMemoryCheck: function() {
-      var _this = this;
+    };
+
+    JTMonitor.prototype._setMemoryCheck = function() {
       if (this.options.memoryLimits) {
-        return this._checkHandlers.push(function(cbf) {
-          return _this._checkMemory(cbf);
-        });
+        return this._checkHandlers.push(this._checkMemory);
       }
-    },
+    };
+
     /**
-    	 * _checkMemory 检测node使用了的内存
-    	 * @return {[type]} [description]
+     * _checkMemory 检测node使用了的内存
+     * @return {[type]} [description]
     */
 
-    _checkMemory: function(cbf) {
+
+    JTMonitor.prototype._checkMemory = function() {
       var level, memoryLimits, memoryUsage, memoryUseTotal, result;
-      if (cbf == null) {
-        cbf = noop;
-      }
       memoryLimits = this.options.memoryLimits;
       result = null;
       if ((memoryLimits != null ? memoryLimits.length : void 0) >= 2) {
         memoryUsage = process.memoryUsage();
-        memoryUseTotal = Math.floor((memoryUsage.rss + memoryUsage.heapTotal) / MBSize);
+        memoryUseTotal = Math.floor(memoryUsage.rss / MBSize);
         level = this._getIndex(memoryLimits, memoryUseTotal);
         result = {
-          type: 'memoryUsage',
+          category: 'memoryUsage',
           level: level,
-          value: memoryUseTotal
+          value: GLOBAL.parseFloat(memoryUseTotal.toFixed(2)),
+          date: new Date
         };
+        return this.emit('log', result);
       }
-      return cbf(null, result);
-    },
-    _setCpuUsageCheck: function() {
-      var _this = this;
+    };
+
+    JTMonitor.prototype._setCpuUsageCheck = function() {
       if (this.options.cpuUsageLimits) {
-        return this._checkHandlers.push(function(cbf) {
-          return _this._checkCpuUsage(cbf);
-        });
+        return this._checkHandlers.push(this._checkCpuUsage);
       }
-    },
+    };
+
     /**
-    	 * _checkCpuUsage 检测CPU的使用率，使用ps命令
-    	 * @param  {[type]} cbf =             noop [description]
-    	 * @return {[type]}     [description]
+     * _checkCpuUsage 检测CPU的使用率，使用ps命令
+     * @return {[type]}     [description]
     */
 
-    _checkCpuUsage: function(cbf) {
+
+    JTMonitor.prototype._checkCpuUsage = function() {
       var cpuUsageLimits,
         _this = this;
-      if (cbf == null) {
-        cbf = noop;
-      }
       cpuUsageLimits = this.options.cpuUsageLimits;
       return cpuUsageExec(cpuUsageCmd, function(err, result) {
-        var level, usage, _ref;
-        if (err) {
-          return cbf(err);
-        } else if (result) {
-          usage = (_ref = result.split('\n')[1]) != null ? _ref.trim() : void 0;
+        var level, usage, _ref1;
+        if (result) {
+          usage = (_ref1 = result.split('\n')[1]) != null ? _ref1.trim() : void 0;
           if (usage) {
             usage = GLOBAL.parseFloat(usage);
             level = _this._getIndex(cpuUsageLimits, usage);
-            return cbf(null, {
-              type: 'cpuUsage',
+            result = {
+              category: 'cpuUsage',
               level: level,
-              value: usage
-            });
+              value: GLOBAL.parseFloat(usage.toFixed(2)),
+              date: new Date
+            };
+            return _this.emit('log', result);
           }
         }
       });
-    },
+    };
+
     /**
-    	 * _getIndex 获取在数组中的位置
-    	 * @param  {[type]} arr   [description]
-    	 * @param  {[type]} value [description]
-    	 * @return {[type]}       [description]
+     * _getIndex 获取在数组中的位置
+     * @param  {[type]} arr   [description]
+     * @param  {[type]} value [description]
+     * @return {[type]}       [description]
     */
 
-    _getIndex: function(arr, value) {
+
+    JTMonitor.prototype._getIndex = function(arr, value) {
       var cardinal, checkValue, i, index, _i, _len;
       index = arr.length;
       cardinal = 1;
@@ -232,9 +235,12 @@
         }
       }
       return index;
-    }
-  };
+    };
 
-  module.exports = monitor;
+    return JTMonitor;
+
+  })(events.EventEmitter);
+
+  module.exports = JTMonitor;
 
 }).call(this);
